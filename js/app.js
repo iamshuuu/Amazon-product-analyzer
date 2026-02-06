@@ -40,33 +40,44 @@ async function analyzeProduct() {
     // Show loading state
     showLoading();
 
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+        // Fetch real product data from API
+        const productData = await apiClient.fetchProduct(asin);
 
-    // Get mock data
-    const productData = getMockProductData(asin);
+        // Validate that we have usable product data
+        if (!productData || !productData.title || productData.title === 'Product Title Not Found' || !productData.salesHistory) {
+            hideLoading();
+            alert(`Product not available.\n\nASIN: ${asin}\n\nThis product doesn't have fallback data.\nPlease try one of these example products:\n\n• AirPods Pro (B08N5WRWNW)\n• Samsung S24 Ultra (B0BSHF7WHW)`);
+            return;
+        }
 
-    if (!productData) {
+        currentProduct = productData;
+
+        // Display product data
+        displayProductOverview(productData);
+        displayQuickStats(productData);
+        displaySalesChart(productData);
+        displayPriceChart(productData);
+        displayReviewAnalytics(productData);
+        displayBSRChart(productData);
+        displayListingQuality(productData);
+        displayCompetitors(productData);
+
+        // Hide loading, show results
         hideLoading();
-        alert('Product not found in demo database. Try one of the example products.');
-        return;
+        showResults();
+    } catch (error) {
+        hideLoading();
+
+        console.error('Error analyzing product:', error);
+
+        // Show user-friendly error message
+        const errorMessage = error.message.includes('Failed to fetch')
+            ? 'Cannot connect to server. Please make sure the backend server is running on http://localhost:3001'
+            : `Error: ${error.message}`;
+
+        alert(`Failed to analyze product.\n\n${errorMessage}\n\nASIN: ${asin}`);
     }
-
-    currentProduct = productData;
-
-    // Display product data
-    displayProductOverview(productData);
-    displayQuickStats(productData);
-    displaySalesChart(productData);
-    displayPriceChart(productData);
-    displayReviewAnalytics(productData);
-    displayBSRChart(productData);
-    displayListingQuality(productData);
-    displayCompetitors(productData);
-
-    // Hide loading, show results
-    hideLoading();
-    showResults();
 }
 
 // Loading states
@@ -89,20 +100,17 @@ function showResults() {
     document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Display product overview
 function displayProductOverview(product) {
     document.getElementById('productImage').src = product.imageUrl;
     document.getElementById('productTitle').textContent = product.title;
 
-    // Add demo data notice if this is generated data
-    const titleElement = document.getElementById('productTitle');
-    if (product.isDemoData) {
-        // Create or update demo notice
-        let demoNotice = document.getElementById('demoNotice');
-        if (!demoNotice) {
-            demoNotice = document.createElement('div');
-            demoNotice.id = 'demoNotice';
-            demoNotice.style.cssText = `
+    // Show notice if using fallback data
+    if (product._meta && product._meta.dataSource === 'fallback') {
+        let notice = document.getElementById('fallbackNotice');
+        if (!notice) {
+            notice = document.createElement('div');
+            notice.id = 'fallbackNotice';
+            notice.style.cssText = `
                 margin-top: var(--spacing-sm);
                 padding: var(--spacing-sm) var(--spacing-md);
                 background: hsla(35, 95%, 60%, 0.15);
@@ -111,21 +119,21 @@ function displayProductOverview(product) {
                 font-size: 0.875rem;
                 color: var(--warning);
             `;
-            titleElement.parentNode.insertBefore(demoNotice, titleElement.nextSibling);
+            document.getElementById('productTitle').parentNode.insertBefore(notice, document.getElementById('productTitle').nextSibling);
         }
-        demoNotice.innerHTML = `
-            <strong>⚠️ Demo Data:</strong> Using randomly generated data for ASIN: <code style="background: hsla(0,0%,0%,0.3); padding: 2px 6px; border-radius: 3px;">${product.asin}</code><br>
-            <small>Product title and details are simulated. All metrics are realistic estimates for demonstration purposes.</small>
+        notice.innerHTML = `
+            <strong>⚠️ Note:</strong> ${product._meta.note}<br>
+            <small>Amazon is blocking automated data collection. Showing demonstration data for this product.</small>
         `;
     } else {
-        // Remove demo notice if it exists
-        const existingNotice = document.getElementById('demoNotice');
+        // Remove notice if it exists
+        const existingNotice = document.getElementById('fallbackNotice');
         if (existingNotice) {
             existingNotice.remove();
         }
     }
 
-    document.getElementById('productPrice').textContent = formatCurrency(product.price);
+    document.getElementById('productPrice').textContent = formatCurrency(product.price, product.currency);
 
     // Stars
     const stars = '★'.repeat(Math.floor(product.rating)) + '☆'.repeat(5 - Math.floor(product.rating));
@@ -160,9 +168,9 @@ function displayQuickStats(product) {
 
     const stats = [
         { label: 'Avg Monthly Sales', value: formatNumber(avgMonthlySales) + ' units' },
-        { label: 'Total Revenue (12M)', value: formatCurrency(totalRevenue) },
+        { label: 'Total Revenue (12M)', value: formatCurrency(totalRevenue, product.currency) },
         { label: 'Current Discount', value: currentDiscount + '% OFF' },
-        { label: 'Lowest Price (12M)', value: formatCurrency(lowestPrice) }
+        { label: 'Lowest Price (12M)', value: formatCurrency(lowestPrice, product.currency) }
     ];
 
     const statsHTML = stats.map(stat => `
@@ -222,7 +230,7 @@ function displaySalesChart(product) {
                         label: function (context) {
                             return currentSalesMetric === 'units'
                                 ? formatNumber(context.parsed.y) + ' units'
-                                : formatCurrency(context.parsed.y);
+                                : formatCurrency(context.parsed.y, product.currency);
                         }
                     }
                 }
@@ -295,9 +303,9 @@ function displayPriceChart(product) {
     const maxPrice = Math.max(...prices);
 
     document.getElementById('priceStats').innerHTML = `
-    Avg: <strong>${formatCurrency(avgPrice)}</strong> | 
-    Min: <strong style="color: var(--success)">${formatCurrency(minPrice)}</strong> | 
-    Max: <strong style="color: var(--danger)">${formatCurrency(maxPrice)}</strong>
+    Avg: <strong>${formatCurrency(avgPrice, product.currency)}</strong> | 
+    Min: <strong style="color: var(--success)">${formatCurrency(minPrice, product.currency)}</strong> | 
+    Max: <strong style="color: var(--danger)">${formatCurrency(maxPrice, product.currency)}</strong>
   `;
 
     charts.price = new Chart(ctx, {
@@ -332,7 +340,7 @@ function displayPriceChart(product) {
                     displayColors: false,
                     callbacks: {
                         label: function (context) {
-                            return formatCurrency(context.parsed.y);
+                            return formatCurrency(context.parsed.y, product.currency);
                         }
                     }
                 }
@@ -536,7 +544,7 @@ function displayCompetitors(product) {
     const currentRow = `
     <tr class="current-product">
       <td><strong>${product.title.substring(0, 50)}...</strong> <span class="badge badge-info">Current</span></td>
-      <td><strong>${formatCurrency(product.price)}</strong></td>
+      <td><strong>${formatCurrency(product.price, product.currency)}</strong></td>
       <td>${product.rating} ★</td>
       <td>${formatNumber(product.totalReviews)}</td>
       <td>#${product.bsr}</td>
@@ -552,7 +560,7 @@ function displayCompetitors(product) {
       <tr>
         <td>${comp.title.substring(0, 50)}...</td>
         <td>
-          ${formatCurrency(comp.price)}
+          ${formatCurrency(comp.price, product.currency)}
           ${priceTrend === 'up' ? '<span class="metric-trend down">↓ Lower</span>' :
                 priceTrend === 'down' ? '<span class="metric-trend up">↑ Higher</span>' : ''}
         </td>
